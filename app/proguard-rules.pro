@@ -31,6 +31,13 @@
     java.lang.Object readResolve();
 }
 
+# ViewModel'и создаются рефлективно (androidx viewModel()/ViewModelProvider).
+# R8-оптимизация не должна убирать/сужать доступ к их конструкторам (иначе
+# IllegalAccessException при newInstance, напр. приватный MoreViewModel в MoreTab).
+-keepclassmembers class * extends androidx.lifecycle.ViewModel {
+    <init>(...);
+}
+
 ##---------------Begin: proguard configuration for RxJava 1.x  ----------
 -dontwarn sun.misc.**
 

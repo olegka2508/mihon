@@ -29,11 +29,17 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build debug APK
-        run: ./gradlew assembleDebug
+      - name: Build debug + foss APK
+        run: ./gradlew assembleDebug assembleFoss
 
-      - name: Upload APK
+      - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
           name: mihon-debug-${{ github.sha }}
           path: app/build/outputs/apk/debug/*.apk
+
+      - name: Upload foss APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: mihon-foss-${{ github.sha }}
+          path: app/build/outputs/apk/foss/*.apk
