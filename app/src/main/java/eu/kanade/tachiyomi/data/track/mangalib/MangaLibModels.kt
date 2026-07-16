@@ -38,7 +38,6 @@ class AuthToken(
 class ChapterDto(
     val id: Long,
     val number: String,
-    val volume: String,
 )
 
 @Serializable

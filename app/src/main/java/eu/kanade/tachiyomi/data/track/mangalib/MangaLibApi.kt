@@ -72,12 +72,16 @@ class MangaLibApi(private val client: OkHttpClient) {
      * GET /api/manga/{slug}/bookmark → item.number.
      */
     suspend fun fetchLastReadNumber(slug: String): Double? = withIOContext {
-        val token = readToken() ?: return@withIOContext null
-        val bookmark = with(json) {
-            client.newCall(GET("$API_DOMAIN/api/manga/$slug/bookmark", headers(token)))
-                .awaitSuccess().parseAs<Data<BookmarkDto>>()
-        }.data
-        bookmark.item?.number?.toDoubleOrNull()
+        // pull не должен бросать: вызывается перед каждым push (TrackChapter) и на открытии тайтла.
+        // Любая ошибка/отсутствие токена → null (прогресс просто не подтянулся).
+        runCatching {
+            val token = readToken() ?: return@runCatching null
+            val bookmark = with(json) {
+                client.newCall(GET("$API_DOMAIN/api/manga/$slug/bookmark", headers(token)))
+                    .awaitSuccess().parseAs<Data<BookmarkDto>>()
+            }.data
+            bookmark.item?.number?.toDoubleOrNull()
+        }.getOrNull()
     }
 
     /**
