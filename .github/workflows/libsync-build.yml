@@ -1,0 +1,39 @@
+name: Build foss APK
+
+on:
+  push:
+    branches: [main, libsync]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build foss APK
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version-file: .github/.java-version
+          distribution: temurin
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build foss APK
+        run: ./gradlew assembleFoss
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: mihon-foss-${{ github.sha }}
+          path: app/build/outputs/apk/foss/*.apk
