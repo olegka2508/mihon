@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Перебивает app_name из модуля i18n: форк ставится рядом с боевым Mihon,
+         одинаковые имена на лаунчере путают. -->
+    <string name="app_name" translatable="false">Mihon LibSync</string>
+</resources>
