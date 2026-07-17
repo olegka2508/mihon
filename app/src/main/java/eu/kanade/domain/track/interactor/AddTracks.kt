@@ -15,6 +15,7 @@ import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.chapter.interactor.GetChaptersByMangaId
 import tachiyomi.domain.history.interactor.GetHistory
 import tachiyomi.domain.manga.model.Manga
+import tachiyomi.domain.track.interactor.GetTracks
 import tachiyomi.domain.track.interactor.InsertTrack
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
@@ -25,6 +26,7 @@ class AddTracks(
     private val syncChapterProgressWithTrack: SyncChapterProgressWithTrack,
     private val getChaptersByMangaId: GetChaptersByMangaId,
     private val trackerManager: TrackerManager,
+    private val getTracks: GetTracks,
 ) {
 
     // TODO: update all trackers based on common data
@@ -79,9 +81,13 @@ class AddTracks(
 
     suspend fun bindEnhancedTrackers(manga: Manga, source: Source) = withNonCancellableContext {
         withIOContext {
+            // Уже привязанные не трогаем: insert идёт с ON CONFLICT REPLACE, повторная
+            // привязка затёрла бы накопленный lastChapterRead нулём из match().
+            val boundTrackerIds = getTracks.await(manga.id).map { it.trackerId }.toSet()
             trackerManager.loggedInTrackers()
                 .filterIsInstance<EnhancedTracker>()
                 .filter { it.accept(source) }
+                .filter { (it as Tracker).id !in boundTrackerIds }
                 .forEach { service ->
                     try {
                         service.match(manga)?.let { track ->
