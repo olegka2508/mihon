@@ -18,6 +18,8 @@ import androidx.work.WorkInfo
 import androidx.work.WorkQuery
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
+import eu.kanade.domain.track.interactor.RefreshTracks
+import eu.kanade.domain.track.service.TrackPreferences
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.notification.Notifications
 import eu.kanade.tachiyomi.source.model.SManga
@@ -85,6 +87,8 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
     private val fetchInterval: FetchInterval = Injekt.get()
     private val filterChaptersForDownload: FilterChaptersForDownload = Injekt.get()
     private val updateMangaFromRemote: UpdateMangaFromRemote = Injekt.get()
+    private val trackPreferences: TrackPreferences = Injekt.get()
+    private val refreshTracks: RefreshTracks = Injekt.get()
 
     private val notifier = LibraryUpdateNotifier(context)
 
@@ -235,6 +239,8 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
         val failedUpdates = CopyOnWriteArrayList<Pair<Manga, String?>>()
         val hasDownloads = AtomicBoolean(false)
         val fetchWindow = fetchInterval.getWindow(ZonedDateTime.now())
+        // Форк: pull прогресса с трекеров per-manga (default off, см. настройки трекинга)
+        val refreshTracksEnabled = trackPreferences.refreshTracksOnLibraryUpdate.get()
 
         coroutineScope {
             mangaToUpdate.groupBy { it.manga.source }.values
@@ -271,6 +277,11 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
 
                                             // Convert to the manga that contains new chapters
                                             newUpdates.add(manga to newChapters.toTypedArray())
+                                        }
+
+                                        // Форк: подтянуть прогресс с трекеров (merge-by-max, ошибки не роняют обновление)
+                                        if (refreshTracksEnabled) {
+                                            refreshTracks.await(manga.id)
                                         }
                                     } catch (e: Throwable) {
                                         val errorMessage = when (e) {

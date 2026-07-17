@@ -88,8 +88,17 @@ class MangaLibApi(private val client: OkHttpClient) {
      * Читает JWT из общего WebView localStorage['auth'] — тот же источник, что у расширения.
      * Пользователь логинится один раз через WebView расширения.
      */
-    @SuppressLint("SetJavaScriptEnabled")
+    // Кэш токена: без него каждый push/pull поднимает WebView (при pull всей библиотеки — сотни раз)
+    @Volatile
+    private var cachedToken: AuthToken? = null
+
     private fun readToken(): AuthToken? {
+        cachedToken?.takeIf { !it.isExpired() }?.let { return it }
+        return readTokenFromWebView()?.also { cachedToken = it }
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun readTokenFromWebView(): AuthToken? {
         val latch = CountDownLatch(1)
         var result: AuthToken? = null
         Handler(Looper.getMainLooper()).post {
