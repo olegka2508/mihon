@@ -38,10 +38,12 @@ class AuthToken(
 class ChapterDto(
     val id: Long,
     val number: String,
+    @SerialName("item_number") val itemNumber: Int? = null,
 )
 
 @Serializable
 class BookmarkDto(
+    val status: Int? = null,
     val item: BookmarkItem? = null,
 ) {
     @Serializable

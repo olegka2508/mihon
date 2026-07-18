@@ -11,9 +11,14 @@ import eu.kanade.tachiyomi.network.POST
 import eu.kanade.tachiyomi.network.awaitSuccess
 import eu.kanade.tachiyomi.network.parseAs
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonObject
 import logcat.LogPriority
 import okhttp3.Headers
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import okhttp3.RequestBody.Companion.toRequestBody
 import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.core.common.util.system.logcat
 import uy.kohesive.injekt.Injekt
@@ -68,6 +73,45 @@ class MangaLibApi(private val client: OkHttpClient) {
         // ponytail: при нескольких бранчах с одним номером помечаем все — соответствует «прочитал N на сайте»
         for (ch in target) {
             client.newCall(POST("$API_DOMAIN/api/manga/$id/chapters/${ch.id}/view", h)).awaitSuccess()
+        }
+        movePointer(slug, target.first(), chapterNumber, h)
+    }
+
+    /**
+     * Двигает указатель «продолжить чтение» на сайте (POST /api/bookmarks).
+     * Главное — пометка read выше, поэтому сбой указателя логируем, но push не валим.
+     */
+    private suspend fun movePointer(slug: String, chapter: ChapterDto, chapterNumber: Double, h: Headers) {
+        runCatching {
+            val bookmark = with(json) {
+                client.newCall(GET("$API_DOMAIN/api/manga/$slug/bookmark", h))
+                    .awaitSuccess().parseAs<Data<BookmarkDto>>()
+            }.data
+
+            // Закладки нет — не создаём: это добавило бы тайтл в аккаунт на сайте.
+            // status обязателен (без него 422) и переиспользуется текущий: слать своё
+            // значение нельзя, оно перенесло бы тайтл из «Любимые»/«Прочитано» в «Читаю».
+            val status = bookmark.status ?: return@runCatching
+            val current = bookmark.item?.number?.toDoubleOrNull()
+            if (current != null && chapterNumber <= current) return@runCatching
+
+            val payload = buildJsonObject {
+                put("media_type", "manga")
+                put("media_slug", slug)
+                putJsonObject("bookmark") {
+                    put("item_id", chapter.id)
+                    put("status", status)
+                }
+                chapter.itemNumber?.let {
+                    // без него meta остаётся от прежней главы и сайт покажет чужой номер
+                    putJsonObject("meta") { put("item_number", it) }
+                }
+            }
+            client.newCall(
+                POST("$API_DOMAIN/api/bookmarks", h, payload.toString().toRequestBody(JSON_MIME)),
+            ).awaitSuccess()
+        }.onFailure {
+            logcat(LogPriority.WARN, it) { "MangaLib tracker: указатель «продолжить» не сдвинут для $slug" }
         }
     }
 
@@ -144,6 +188,7 @@ class MangaLibApi(private val client: OkHttpClient) {
         private const val API_DOMAIN = "https://api.cdnlibs.org"
         private const val SITE_ID = "1"
         private const val EPS = 1e-4
+        private val JSON_MIME = "application/json".toMediaType()
         private const val USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"
     }
