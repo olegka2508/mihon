@@ -43,23 +43,27 @@ class MangaLibApi(private val client: OkHttpClient) {
      * POST /api/manga/{manga_id}/chapters/{chapter_id}/view (пустое тело).
      */
     suspend fun markChapterRead(slug: String, chapterNumber: Double): Unit = withIOContext {
-        val token = readToken() ?: run {
-            logcat(LogPriority.INFO) { "MangaLib tracker: нет токена (залогинься через WebView расширения)" }
-            return@withIOContext
-        }
+        // Ошибки бросаем, а не глотаем: Mihon покажет сбой трекинга и поставит на ретрай
+        // (DelayedTrackingUpdateJob). Тихий выход once уже стоил сессии диагностики.
+        val token = readToken()
+            ?: throw IllegalStateException("MangaLib: не залогинен — открой mangalib в браузере расширения")
         val h = headers(token)
         val id = mangaId(slug)
         val chapters = with(json) {
             client.newCall(GET("$API_DOMAIN/api/manga/$slug/chapters", h))
                 .awaitSuccess().parseAs<Data<List<ChapterDto>>>()
         }.data
+        // Тайтл снят с mangalib (API отдаёт пустой список) — штатная ситуация, отмечать нечего
+        if (chapters.isEmpty()) {
+            logcat(LogPriority.INFO) { "MangaLib tracker: у $slug нет глав в API, push пропущен" }
+            return@withIOContext
+        }
         val target = chapters.filter {
             val n = it.number.toDoubleOrNull() ?: return@filter false
             abs(n - chapterNumber) < EPS
         }
         if (target.isEmpty()) {
-            logcat(LogPriority.WARN) { "MangaLib tracker: глава $chapterNumber не найдена в $slug" }
-            return@withIOContext
+            throw IllegalStateException("MangaLib: глава $chapterNumber не найдена в $slug")
         }
         // ponytail: при нескольких бранчах с одним номером помечаем все — соответствует «прочитал N на сайте»
         for (ch in target) {
