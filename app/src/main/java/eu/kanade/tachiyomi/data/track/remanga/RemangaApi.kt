@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.data.track.remanga
 
 import eu.kanade.tachiyomi.network.GET
+import eu.kanade.tachiyomi.network.HttpException
 import eu.kanade.tachiyomi.network.POST
 import eu.kanade.tachiyomi.network.awaitSuccess
 import eu.kanade.tachiyomi.network.parseAs
@@ -58,7 +59,15 @@ class RemangaApi(private val client: OkHttpClient) {
             ?: throw IllegalStateException("Remanga: не залогинен — войди через WebView расширения")
         val h = headers(token)
 
-        val branchId = mainBranchId(dir, h) ?: run {
+        // 404 = dir устарел (тайтл переехал/снят) — штатный пропуск, а не повод для ретраев
+        val title = try {
+            title(dir, h)
+        } catch (e: HttpException) {
+            if (e.code != 404) throw e
+            logcat(LogPriority.INFO) { "Remanga tracker: тайтл $dir не найден на сайте, push пропущен" }
+            return@withIOContext
+        }
+        val branchId = title.branches.maxByOrNull { it.countChapters }?.id ?: run {
             logcat(LogPriority.INFO) { "Remanga tracker: у $dir нет веток, push пропущен" }
             return@withIOContext
         }
@@ -86,10 +95,6 @@ class RemangaApi(private val client: OkHttpClient) {
             title(dir, headers(token)).currentReading?.chapter?.toDoubleOrNull()
         }.getOrNull()
     }
-
-    /** Ветка с наибольшим числом глав — как правило основная. */
-    private suspend fun mainBranchId(dir: String, h: Headers): Long? =
-        title(dir, h).branches.maxByOrNull { it.countChapters }?.id
 
     /**
      * Ищет главу по номеру. Сервер режет count до 100 и игнорирует фильтры, зато номера
