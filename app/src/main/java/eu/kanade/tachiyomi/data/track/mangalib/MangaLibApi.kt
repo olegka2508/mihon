@@ -88,12 +88,14 @@ class MangaLibApi(private val client: OkHttpClient) {
                     .awaitSuccess().parseAs<Data<BookmarkDto>>()
             }.data
 
-            // Закладки нет — не создаём: это добавило бы тайтл в аккаунт на сайте.
-            // status обязателен (без него 422) и переиспользуется текущий: слать своё
-            // значение нельзя, оно перенесло бы тайтл из «Любимые»/«Прочитано» в «Читаю».
-            val status = bookmark.status ?: return@runCatching
+            // Закладки нет → заводим её в «Читаю» (тайтл, начатый в Mihon, появляется на сайте).
+            // Закладка есть → переиспортируем её status: своё значение перенесло бы тайтл
+            // из «Любимые»/«Прочитано» в «Читаю». READING проверен живьём (POST /bookmarks → 201).
+            val existing = bookmark.status
+            val status = existing ?: READING
             val current = bookmark.item?.number?.toDoubleOrNull()
-            if (current != null && chapterNumber <= current) return@runCatching
+            // Уже в закладках и указатель не позади — двигать нечего
+            if (existing != null && current != null && chapterNumber <= current) return@runCatching
 
             val payload = buildJsonObject {
                 put("media_type", "manga")
@@ -187,6 +189,7 @@ class MangaLibApi(private val client: OkHttpClient) {
         private const val BASE_URL = "https://mangalib.me"
         private const val API_DOMAIN = "https://api.cdnlibs.org"
         private const val SITE_ID = "1"
+        private const val READING = 1 // status папки «Читаю» для новых тайтлов
         private const val EPS = 1e-4
         private val JSON_MIME = "application/json".toMediaType()
         private const val USER_AGENT =
