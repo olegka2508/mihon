@@ -19,7 +19,6 @@ import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.core.common.util.system.logcat
 import uy.kohesive.injekt.injectLazy
 import java.net.URLDecoder
-import kotlin.math.abs
 import kotlin.math.ceil
 
 class RemangaApi(private val client: OkHttpClient) {
@@ -49,9 +48,12 @@ class RemangaApi(private val client: OkHttpClient) {
     }.content
 
     /**
-     * PUSH: пометить главу [chapterNumber] прочитанной.
-     * POST /api/activity/views/ тело {"chapter_ids":[id]} — то же, что шлёт кнопка
-     * «отметить прочитанным» на сайте (обратимо через DELETE тем же телом).
+     * PUSH: пометить прочитанными все главы вплоть до [chapterNumber].
+     * Отмечаем диапазон (current_reading, chapterNumber] — так закрываем «пробел»:
+     * при прыжке вперёд промежуточные главы тоже становятся прочитанными (как на mangalib,
+     * где сайт сам заполняет между; у Remanga такого нет — заполняем клиентом).
+     * POST /api/activity/views/ тело {"chapter_ids":[…]} — батч кнопки «прочитано»
+     * (обратимо через DELETE тем же телом). Сервер режет большой payload → шлём чанками.
      */
     suspend fun markChapterRead(dir: String, chapterNumber: Double): Unit = withIOContext {
         // Ошибки бросаем: TrackChapter поставит главу в DelayedTrackingStore на ретрай.
@@ -71,15 +73,20 @@ class RemangaApi(private val client: OkHttpClient) {
             logcat(LogPriority.INFO) { "Remanga tracker: у $dir нет веток, push пропущен" }
             return@withIOContext
         }
-        val chapter = findChapter(branchId, chapterNumber, h)
-            ?: throw IllegalStateException("Remanga: глава $chapterNumber не найдена в $dir")
 
-        val payload = buildJsonObject {
-            putJsonArray("chapter_ids") { add(chapter.id) }
+        // Нижняя граница — прогресс на сайте: ниже него всё уже прочитано, не трогаем.
+        val from = title.currentReading?.chapter?.toDoubleOrNull() ?: 0.0
+        val ids = collectChapterIds(branchId, from, chapterNumber, h)
+        if (ids.isEmpty()) return@withIOContext // сайт уже впереди или главы не найдены
+
+        ids.chunked(BATCH_SIZE).forEach { chunk ->
+            val payload = buildJsonObject {
+                putJsonArray("chapter_ids") { chunk.forEach { add(it) } }
+            }
+            client.newCall(
+                POST("$API_URL/api/activity/views/", h, payload.toString().toRequestBody(JSON_MIME)),
+            ).awaitSuccess()
         }
-        client.newCall(
-            POST("$API_URL/api/activity/views/", h, payload.toString().toRequestBody(JSON_MIME)),
-        ).awaitSuccess()
     }
 
     /**
@@ -97,37 +104,30 @@ class RemangaApi(private val client: OkHttpClient) {
     }
 
     /**
-     * Ищет главу по номеру. Сервер режет count до 100 и игнорирует фильтры, зато номера
-     * глав идут почти вровень с index — вычисляем нужную страницу и правим промах.
-     * Обычно 1 запрос; у тайтла на 3865 глав перебор стоил бы 39.
+     * Собирает id глав с номером в (from, to]. Сервер режет count до 100 и игнорирует
+     * фильтры, зато номера идут почти вровень с index → стартуем со страницы, где номера
+     * подходят к from, и идём вперёд, пока номера не перевалят за to.
+     * Обычная дочитка (from≈to) — 1 страница; разовая выгрузка с нуля — вся ветка.
      */
-    private suspend fun findChapter(branchId: Long, target: Double, h: Headers): ChapterDto? {
-        var page = maxOf(1, ceil(target / PAGE_SIZE).toInt())
-        val seen = mutableSetOf<Int>()
+    private suspend fun collectChapterIds(branchId: Long, from: Double, to: Double, h: Headers): List<Long> {
+        if (to <= from) return emptyList()
+        val ids = mutableListOf<Long>()
+        // старт на страницу раньше расчётной — страховка, если номера чуть опережают index
+        var page = maxOf(1, ceil(from / PAGE_SIZE).toInt() - 1)
 
-        repeat(MAX_PROBES) {
-            if (!seen.add(page)) return null
+        repeat(MAX_PAGES) {
             val chapters = chaptersPage(branchId, page, h)
-            if (chapters.isEmpty()) {
-                // за последней страницей — шагаем назад
-                page = (page - 1).takeIf { it >= 1 } ?: return null
-                return@repeat
-            }
-            chapters.firstOrNull { abs((it.chapter.toDoubleOrNull() ?: return@firstOrNull false) - target) < EPS }
-                ?.let { return it }
-
+            if (chapters.isEmpty()) return ids // дошли до конца ветки
             val numbers = chapters.mapNotNull { it.chapter.toDoubleOrNull() }
-            if (numbers.isEmpty()) return null
-            val min = numbers.min()
-            val max = numbers.max()
-            page += when {
-                target < min -> -maxOf(1, ceil((min - target) / PAGE_SIZE).toInt())
-                target > max -> maxOf(1, ceil((target - max) / PAGE_SIZE).toInt())
-                else -> return null // номер внутри диапазона страницы, но главы нет
+            chapters.forEach { c ->
+                val n = c.chapter.toDoubleOrNull() ?: return@forEach
+                if (n > from + EPS && n <= to + EPS) ids.add(c.id)
             }
-            if (page < 1) return null
+            // если минимум страницы уже выше to — дальше только более старшие главы
+            if ((numbers.minOrNull() ?: Double.MAX_VALUE) > to + EPS) return ids
+            page++
         }
-        return null
+        return ids
     }
 
     private suspend fun chaptersPage(branchId: Long, page: Int, h: Headers): List<ChapterDto> = with(json) {
@@ -143,7 +143,8 @@ class RemangaApi(private val client: OkHttpClient) {
         private const val SITE_URL = "https://remanga.org"
         private const val API_URL = "https://api.remanga.org"
         private const val PAGE_SIZE = 100
-        private const val MAX_PROBES = 6
+        private const val MAX_PAGES = 60 // хватает на самую длинную ветку (~3865 глав)
+        private const val BATCH_SIZE = 100 // чанк chapter_ids в одном POST
         private const val EPS = 1e-4
         private val JSON_MIME = "application/json".toMediaType()
         private const val USER_AGENT =

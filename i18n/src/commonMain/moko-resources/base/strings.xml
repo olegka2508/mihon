@@ -536,6 +536,10 @@
     <string name="pref_auto_update_manga_on_mark_read">Update progress when marked as read</string>
     <string name="pref_refresh_tracks_on_library_update">Pull tracker progress on library update</string>
     <string name="pref_refresh_tracks_on_library_update_summary">Fetches read progress from trackers for each title during library update. Slower updates.</string>
+    <string name="pref_push_all_read_to_trackers">Push all read progress to trackers</string>
+    <string name="pref_push_all_read_to_trackers_summary">One-time: marks every read chapter on the linked sites, filling gaps. May take a while.</string>
+    <string name="push_all_read_started">Pushing read progress to trackers…</string>
+    <string name="push_all_read_done">Progress pushed for %1$d titles</string>
     <string name="services">Trackers</string>
     <string name="tracking_info">One-way sync to update the chapter progress in external tracker services. Set up tracking for individual entries from their tracking button.</string>
     <string name="enhanced_services">Enhanced trackers</string>
