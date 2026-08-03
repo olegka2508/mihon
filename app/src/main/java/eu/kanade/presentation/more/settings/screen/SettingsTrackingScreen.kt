@@ -59,6 +59,10 @@ import eu.kanade.tachiyomi.data.track.myanimelist.MyAnimeListApi
 import eu.kanade.tachiyomi.data.track.shikimori.ShikimoriApi
 import eu.kanade.tachiyomi.util.system.openInBrowser
 import eu.kanade.tachiyomi.util.system.toast
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import logcat.LogPriority
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.util.lang.launchIO
@@ -75,6 +79,13 @@ import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 
 object SettingsTrackingScreen : SearchableSettings {
+
+    // Разовая выгрузка идёт минуты по всей библиотеке — держим её на процесс-долгом scope,
+    // а не на rememberCoroutineScope (тот отменился бы при уходе с экрана и оборвал проход).
+    private val bulkPushScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    @Volatile
+    private var bulkPushRunning = false
 
     @ReadOnlyComposable
     @Composable
@@ -94,8 +105,8 @@ object SettingsTrackingScreen : SearchableSettings {
     @Composable
     override fun getPreferences(): List<Preference> {
         val context = LocalContext.current
-        val scope = rememberCoroutineScope()
-        var pushingAll by remember { mutableStateOf(false) }
+        // при возврате на экран во время прохода кнопка остаётся заблокированной
+        var pushingAll by remember { mutableStateOf(bulkPushRunning) }
         val trackPreferences = remember { Injekt.get<TrackPreferences>() }
         val trackerManager = remember { Injekt.get<TrackerManager>() }
         val sourceManager = remember { Injekt.get<SourceManager>() }
@@ -159,15 +170,19 @@ object SettingsTrackingScreen : SearchableSettings {
                 },
                 enabled = !pushingAll,
                 onClick = {
-                    // защита от повторного тапа: параллельные проходы сорвали бы
-                    // последовательную выдачу запросов, на которую рассчитан анти-DDoS-Guard
-                    if (!pushingAll) {
+                    // защита от повторного тапа (в т.ч. с другого входа на экран): параллельные
+                    // проходы сорвали бы последовательную выдачу, на которую рассчитан анти-DDoS-Guard
+                    if (!bulkPushRunning) {
+                        bulkPushRunning = true
                         pushingAll = true
-                        scope.launchIO {
+                        // applicationContext: проход переживает уход с экрана, тост не привязан к активити
+                        val appContext = context.applicationContext
+                        bulkPushScope.launch {
                             try {
-                                pushAllReadToTrackers(context)
+                                pushAllReadToTrackers(appContext)
                             } finally {
-                                withUIContext { pushingAll = false }
+                                bulkPushRunning = false
+                                withUIContext { runCatching { pushingAll = false } }
                             }
                         }
                     }
