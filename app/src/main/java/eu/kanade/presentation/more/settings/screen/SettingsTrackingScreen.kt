@@ -43,8 +43,9 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import dev.icerock.moko.resources.StringResource
-import eu.kanade.domain.track.interactor.TrackChapter
+import eu.kanade.domain.track.interactor.AddTracks
 import eu.kanade.domain.track.model.AutoTrackState
+import eu.kanade.domain.track.model.toDbTrack
 import eu.kanade.domain.track.service.TrackPreferences
 import eu.kanade.presentation.more.settings.Preference
 import eu.kanade.tachiyomi.data.track.EnhancedTracker
@@ -58,12 +59,15 @@ import eu.kanade.tachiyomi.data.track.myanimelist.MyAnimeListApi
 import eu.kanade.tachiyomi.data.track.shikimori.ShikimoriApi
 import eu.kanade.tachiyomi.util.system.openInBrowser
 import eu.kanade.tachiyomi.util.system.toast
+import logcat.LogPriority
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.lang.withUIContext
+import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.chapter.interactor.GetChaptersByMangaId
 import tachiyomi.domain.manga.interactor.GetLibraryManga
 import tachiyomi.domain.source.service.SourceManager
+import tachiyomi.domain.track.interactor.GetTracks
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.material.padding
 import tachiyomi.presentation.core.i18n.stringResource
@@ -91,6 +95,7 @@ object SettingsTrackingScreen : SearchableSettings {
     override fun getPreferences(): List<Preference> {
         val context = LocalContext.current
         val scope = rememberCoroutineScope()
+        var pushingAll by remember { mutableStateOf(false) }
         val trackPreferences = remember { Injekt.get<TrackPreferences>() }
         val trackerManager = remember { Injekt.get<TrackerManager>() }
         val sourceManager = remember { Injekt.get<SourceManager>() }
@@ -147,8 +152,26 @@ object SettingsTrackingScreen : SearchableSettings {
             ),
             Preference.PreferenceItem.TextPreference(
                 title = stringResource(MR.strings.pref_push_all_read_to_trackers),
-                subtitle = stringResource(MR.strings.pref_push_all_read_to_trackers_summary),
-                onClick = { scope.launchIO { pushAllReadToTrackers(context) } },
+                subtitle = if (pushingAll) {
+                    stringResource(MR.strings.push_all_read_started)
+                } else {
+                    stringResource(MR.strings.pref_push_all_read_to_trackers_summary)
+                },
+                enabled = !pushingAll,
+                onClick = {
+                    // защита от повторного тапа: параллельные проходы сорвали бы
+                    // последовательную выдачу запросов, на которую рассчитан анти-DDoS-Guard
+                    if (!pushingAll) {
+                        pushingAll = true
+                        scope.launchIO {
+                            try {
+                                pushAllReadToTrackers(context)
+                            } finally {
+                                withUIContext { pushingAll = false }
+                            }
+                        }
+                    }
+                },
             ),
             Preference.PreferenceGroup(
                 title = stringResource(MR.strings.services),
@@ -335,34 +358,55 @@ object SettingsTrackingScreen : SearchableSettings {
 
     /**
      * Форк: разовая выгрузка всего прочитанного прогресса на трекеры (Mihon → сайты).
-     * По каждому тайтлу берём макс. прочитанную главу и зовём TrackChapter — он пушит
-     * во все привязанные трекеры (merge-by-max, ошибки уходят в DelayedTrackingStore).
-     * Remanga при этом заполняет пробел (все главы до фронтира). Последовательно, чтобы
-     * не долбить сайт параллельными запросами (DDoS-Guard душит скриптовый напор).
+     * По каждому тайтлу берём макс. прочитанную главу и пушим НАПРЯМУЮ во все привязанные
+     * enhanced-трекеры. Последовательно, чтобы не долбить сайт параллельными запросами
+     * (DDoS-Guard душит скриптовый напор, но доверяет контексту приложения).
      *
-     * ponytail: заполняет от текущего фронтира сайта вверх до макс. прочитанной в Mihon.
-     * Тайтл, где сайт уже на фронтире (maxRead <= lastChapterRead), пропускается —
-     * старые пробелы НИЖЕ фронтира так не закрыть. Для нетронутого бэклога (сайт низко)
-     * заполняет всё; если понадобится добить такие пробелы — отдельный «force full» проход.
+     * Почему напрямую, а не через TrackChapter: (1) TrackChapter пушит только тайтлы, у
+     * которых УЖЕ есть трек-запись, а у большинства библиотеки её нет (привязка ленивая,
+     * только при открытии тайтла) — поэтому сначала bindEnhancedTrackers; (2) его гард
+     * «chapterNumber <= lastChapterRead» пропустил бы тех, кто читал подряд, ведь привязка
+     * поднимает БД-фронтир БЕЗ реального push. Прямой update(didReadChapter=true) шлёт maxRead
+     * независимо от БД; markChapterRead у Remanga заполняет пробел от фронтира сайта.
+     *
+     * ponytail: заполняет от фронтира САЙТА вверх до maxRead. Пробелы ниже уже выставленного
+     * на сайте фронтира так не закрыть; для нетронутого бэклога (сайт низко) заполняет всё.
      */
     private suspend fun pushAllReadToTrackers(context: Context) {
         val getLibraryManga = Injekt.get<GetLibraryManga>()
         val getChapters = Injekt.get<GetChaptersByMangaId>()
-        val trackChapter = Injekt.get<TrackChapter>()
+        val getTracks = Injekt.get<GetTracks>()
+        val addTracks = Injekt.get<AddTracks>()
+        val trackerManager = Injekt.get<TrackerManager>()
+        val sourceManager = Injekt.get<SourceManager>()
 
         withUIContext { context.toast(MR.strings.push_all_read_started) }
-        val library = getLibraryManga.await().distinctBy { it.manga.id }
         var pushed = 0
-        for (libManga in library) {
-            val maxRead = getChapters.await(libManga.manga.id)
+        var failed = 0
+        for (libManga in getLibraryManga.await().distinctBy { it.manga.id }) {
+            val manga = libManga.manga
+            val maxRead = getChapters.await(manga.id)
                 .filter { it.read }
                 .maxOfOrNull { it.chapterNumber }
                 ?: continue
             if (maxRead <= 0.0) continue
-            runCatching { trackChapter.await(context, libManga.manga.id, maxRead, setupJobOnFailure = false) }
-                .onSuccess { pushed++ }
+
+            // Привязать enhanced-трекеры, если тайтл ещё не привязан — иначе push не по чему.
+            // bindEnhancedTrackers идемпотентен: уже привязанные пропускает.
+            runCatching { addTracks.bindEnhancedTrackers(manga, sourceManager.getOrStub(manga.source)) }
+
+            getTracks.await(manga.id).forEach { track ->
+                val tracker = trackerManager.get(track.trackerId) ?: return@forEach
+                if (tracker !is EnhancedTracker || !tracker.isLoggedIn) return@forEach
+                runCatching {
+                    tracker.update(track.copy(lastChapterRead = maxRead).toDbTrack(), didReadChapter = true)
+                }.onSuccess { pushed++ }.onFailure {
+                    failed++
+                    logcat(LogPriority.WARN, it) { "Bulk push: ${manga.title} → ${tracker.name} не отправлен" }
+                }
+            }
         }
-        withUIContext { context.toast(context.stringResource(MR.strings.push_all_read_done, pushed)) }
+        withUIContext { context.toast(context.stringResource(MR.strings.push_all_read_done, pushed, failed)) }
     }
 
     @Composable

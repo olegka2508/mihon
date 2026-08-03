@@ -105,16 +105,27 @@ class RemangaApi(private val client: OkHttpClient) {
 
     /**
      * Собирает id глав с номером в (from, to]. Сервер режет count до 100 и игнорирует
-     * фильтры, зато номера идут почти вровень с index → стартуем со страницы, где номера
-     * подходят к from, и идём вперёд, пока номера не перевалят за to.
-     * Обычная дочитка (from≈to) — 1 страница; разовая выгрузка с нуля — вся ветка.
+     * фильтры, номера идут по возрастанию вместе с index (ordering=index).
+     * Эвристика «номер≈index» даёт старт-страницу, но она может ПРОМАХНУТЬСЯ, если номера
+     * опережают index (нумерация с большого числа) или from за концом ветки → сначала
+     * откатываемся назад до страницы, чей минимум ≤ from, потом идём вперёд до to.
+     * Обычная дочитка (from≈to) — 1–2 страницы; разовая выгрузка с нуля — вся ветка.
      */
     private suspend fun collectChapterIds(branchId: Long, from: Double, to: Double, h: Headers): List<Long> {
         if (to <= from) return emptyList()
-        val ids = mutableListOf<Long>()
-        // старт на страницу раньше расчётной — страховка, если номера чуть опережают index
-        var page = maxOf(1, ceil(from / PAGE_SIZE).toInt() - 1)
+        var page = maxOf(1, ceil(from / PAGE_SIZE).toInt())
 
+        // Откат назад: пустая страница (за концом ветки) или минимум страницы выше from —
+        // значит старт слишком высоко и мы бы перескочили нужные главы.
+        var back = 0
+        while (page > 1 && back < MAX_PAGES) {
+            back++
+            val min = chaptersPage(branchId, page, h).mapNotNull { it.chapter.toDoubleOrNull() }.minOrNull()
+            if (min != null && min <= from + EPS) break
+            page--
+        }
+
+        val ids = mutableListOf<Long>()
         repeat(MAX_PAGES) {
             val chapters = chaptersPage(branchId, page, h)
             if (chapters.isEmpty()) return ids // дошли до конца ветки
