@@ -31,6 +31,10 @@ object Notifications {
     const val CHANNEL_LIBRARY_ERROR = "library_errors_channel"
     const val ID_LIBRARY_ERROR = -102
 
+    // Форк: разовая выгрузка прогресса на трекеры (TrackerBulkPushJob)
+    const val ID_TRACKER_BULK_PROGRESS = -104
+    const val ID_TRACKER_BULK_COMPLETE = -105
+
     /**
      * Notification channel and ids used by the downloader.
      */

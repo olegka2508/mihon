@@ -540,6 +540,10 @@
     <string name="pref_push_all_read_to_trackers_summary">One-time: marks every read chapter on the linked sites, filling gaps. May take a while.</string>
     <string name="push_all_read_started">Pushing read progress to trackers…</string>
     <string name="push_all_read_done">Pushed to trackers: %1$d, failed: %2$d</string>
+    <string name="tracker_bulk_push_progress">Pushing read progress to trackers</string>
+    <string name="tracker_bulk_push_done">Push to trackers finished</string>
+    <string name="tracker_bulk_push_none">No linked trackers</string>
+    <string name="tracker_bulk_push_errors">Errors:</string>
     <string name="services">Trackers</string>
     <string name="tracking_info">One-way sync to update the chapter progress in external tracker services. Set up tracking for individual entries from their tracking button.</string>
     <string name="enhanced_services">Enhanced trackers</string>

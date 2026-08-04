@@ -43,15 +43,13 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import dev.icerock.moko.resources.StringResource
-import eu.kanade.domain.track.interactor.AddTracks
 import eu.kanade.domain.track.model.AutoTrackState
-import eu.kanade.domain.track.model.toDbTrack
 import eu.kanade.domain.track.service.TrackPreferences
 import eu.kanade.presentation.more.settings.Preference
 import eu.kanade.tachiyomi.data.track.EnhancedTracker
 import eu.kanade.tachiyomi.data.track.Tracker
 import eu.kanade.tachiyomi.data.track.TrackerManager
-import eu.kanade.tachiyomi.data.track.remanga.Remanga
+import eu.kanade.tachiyomi.data.track.TrackerBulkPushJob
 import eu.kanade.tachiyomi.data.track.anilist.AnilistApi
 import eu.kanade.tachiyomi.data.track.bangumi.BangumiApi
 import eu.kanade.tachiyomi.data.track.hikka.HikkaApi
@@ -60,18 +58,9 @@ import eu.kanade.tachiyomi.data.track.myanimelist.MyAnimeListApi
 import eu.kanade.tachiyomi.data.track.shikimori.ShikimoriApi
 import eu.kanade.tachiyomi.util.system.openInBrowser
 import eu.kanade.tachiyomi.util.system.toast
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
-import logcat.LogPriority
 import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.lang.withUIContext
-import tachiyomi.core.common.util.system.logcat
-import tachiyomi.domain.chapter.interactor.GetChaptersByMangaId
-import tachiyomi.domain.manga.interactor.GetLibraryManga
 import tachiyomi.domain.source.service.SourceManager
-import tachiyomi.domain.track.interactor.GetTracks
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.material.padding
 import tachiyomi.presentation.core.i18n.stringResource
@@ -79,13 +68,6 @@ import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 
 object SettingsTrackingScreen : SearchableSettings {
-
-    // Разовая выгрузка идёт минуты по всей библиотеке — держим её на процесс-долгом scope,
-    // а не на rememberCoroutineScope (тот отменился бы при уходе с экрана и оборвал проход).
-    private val bulkPushScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
-    @Volatile
-    private var bulkPushRunning = false
 
     @ReadOnlyComposable
     @Composable
@@ -105,8 +87,6 @@ object SettingsTrackingScreen : SearchableSettings {
     @Composable
     override fun getPreferences(): List<Preference> {
         val context = LocalContext.current
-        // при возврате на экран во время прохода кнопка остаётся заблокированной
-        var pushingAll by remember { mutableStateOf(bulkPushRunning) }
         val trackPreferences = remember { Injekt.get<TrackPreferences>() }
         val trackerManager = remember { Injekt.get<TrackerManager>() }
         val sourceManager = remember { Injekt.get<SourceManager>() }
@@ -163,29 +143,12 @@ object SettingsTrackingScreen : SearchableSettings {
             ),
             Preference.PreferenceItem.TextPreference(
                 title = stringResource(MR.strings.pref_push_all_read_to_trackers),
-                subtitle = if (pushingAll) {
-                    stringResource(MR.strings.push_all_read_started)
-                } else {
-                    stringResource(MR.strings.pref_push_all_read_to_trackers_summary)
-                },
-                enabled = !pushingAll,
+                subtitle = stringResource(MR.strings.pref_push_all_read_to_trackers_summary),
                 onClick = {
-                    // защита от повторного тапа (в т.ч. с другого входа на экран): параллельные
-                    // проходы сорвали бы последовательную выдачу, на которую рассчитан анти-DDoS-Guard
-                    if (!bulkPushRunning) {
-                        bulkPushRunning = true
-                        pushingAll = true
-                        // applicationContext: проход переживает уход с экрана, тост не привязан к активити
-                        val appContext = context.applicationContext
-                        bulkPushScope.launch {
-                            try {
-                                pushAllReadToTrackers(appContext)
-                            } finally {
-                                bulkPushRunning = false
-                                withUIContext { runCatching { pushingAll = false } }
-                            }
-                        }
-                    }
+                    // фоновая задача с полосой прогресса и отчётом-уведомлением; KEEP не даёт
+                    // запустить параллельный проход повторным тапом
+                    context.toast(MR.strings.push_all_read_started)
+                    TrackerBulkPushJob.startNow(context)
                 },
             ),
             Preference.PreferenceGroup(
@@ -369,76 +332,6 @@ object SettingsTrackingScreen : SearchableSettings {
             withUIContext { context.toast(e.message.toString()) }
             false
         }
-    }
-
-    /**
-     * Форк: разовая выгрузка всего прочитанного прогресса на трекеры (Mihon → сайты).
-     * По каждому тайтлу берём макс. прочитанную главу и пушим НАПРЯМУЮ во все привязанные
-     * enhanced-трекеры. Последовательно, чтобы не долбить сайт параллельными запросами
-     * (DDoS-Guard душит скриптовый напор, но доверяет контексту приложения).
-     *
-     * Почему напрямую, а не через TrackChapter: (1) TrackChapter пушит только тайтлы, у
-     * которых УЖЕ есть трек-запись, а у большинства библиотеки её нет (привязка ленивая,
-     * только при открытии тайтла) — поэтому сначала bindEnhancedTrackers; (2) его гард
-     * «chapterNumber <= lastChapterRead» пропустил бы тех, кто читал подряд, ведь привязка
-     * поднимает БД-фронтир БЕЗ реального push. Прямой update(didReadChapter=true) шлёт maxRead
-     * независимо от БД; markChapterRead у Remanga заполняет пробел от фронтира сайта.
-     *
-     * ponytail: заполняет от фронтира САЙТА вверх до maxRead. Пробелы ниже уже выставленного
-     * на сайте фронтира так не закрыть; для нетронутого бэклога (сайт низко) заполняет всё.
-     */
-    private suspend fun pushAllReadToTrackers(context: Context) {
-        val getLibraryManga = Injekt.get<GetLibraryManga>()
-        val getChapters = Injekt.get<GetChaptersByMangaId>()
-        val getTracks = Injekt.get<GetTracks>()
-        val addTracks = Injekt.get<AddTracks>()
-        val trackerManager = Injekt.get<TrackerManager>()
-        val sourceManager = Injekt.get<SourceManager>()
-
-        withUIContext { context.toast(MR.strings.push_all_read_started) }
-        // диагностика: счёт ok/ошибок ПО ТРЕКЕРАМ + текст первой ошибки (видно, что именно падает)
-        val ok = HashMap<String, Int>()
-        val err = HashMap<String, Int>()
-        var firstError: String? = null
-        for (libManga in getLibraryManga.await().distinctBy { it.manga.id }) {
-            val manga = libManga.manga
-            val maxRead = getChapters.await(manga.id)
-                .filter { it.read }
-                .maxOfOrNull { it.chapterNumber }
-                ?: continue
-            if (maxRead <= 0.0) continue
-
-            // Привязать enhanced-трекеры, если тайтл ещё не привязан — иначе push не по чему.
-            // bindEnhancedTrackers идемпотентен: уже привязанные пропускает.
-            runCatching { addTracks.bindEnhancedTrackers(manga, sourceManager.getOrStub(manga.source)) }
-
-            getTracks.await(manga.id).forEach { track ->
-                val tracker = trackerManager.get(track.trackerId) ?: return@forEach
-                if (!tracker.isLoggedIn) return@forEach
-                val dbTrack = track.copy(lastChapterRead = maxRead).toDbTrack()
-                runCatching {
-                    when (tracker) {
-                        // Remanga: полная глубина — закрывает и пробелы ниже сайтового указателя
-                        is Remanga -> tracker.pushAllRead(dbTrack)
-                        // MangaLib и пр.: сайт заполняет между сам при сдвиге указателя
-                        is EnhancedTracker -> tracker.update(dbTrack, didReadChapter = true)
-                        else -> return@forEach
-                    }
-                }.onSuccess { ok[tracker.name] = (ok[tracker.name] ?: 0) + 1 }.onFailure {
-                    err[tracker.name] = (err[tracker.name] ?: 0) + 1
-                    if (firstError == null) firstError = "${tracker.name}: ${it.message ?: it.javaClass.simpleName}"
-                    logcat(LogPriority.WARN, it) { "Bulk push: ${manga.title} → ${tracker.name} не отправлен" }
-                }
-            }
-        }
-        // тост вида «MangaLib 69/0, Remanga 0/53 — Remanga: не залогинен…»
-        val summary = buildString {
-            val names = (ok.keys + err.keys).toSortedSet()
-            append(names.joinToString(", ") { "$it ${ok[it] ?: 0}/${err[it] ?: 0}" })
-            firstError?.let { append(" — ").append(it.take(120)) }
-            if (isEmpty()) append("нет привязанных трекеров")
-        }
-        withUIContext { context.toast(summary) }
     }
 
     @Composable
