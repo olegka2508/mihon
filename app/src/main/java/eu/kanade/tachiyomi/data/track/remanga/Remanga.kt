@@ -66,6 +66,17 @@ class Remanga(id: Long) : BaseTracker(id, "Remanga"), EnhancedTracker {
         return track
     }
 
+    /**
+     * Разовая полная выгрузка (кнопка «Push all read»): пометить ВСЕ главы вплоть до
+     * last_chapter_read независимо от сайтового указателя — так закрываются и пробелы ниже
+     * фронтира (обычный push через update() их не трогает).
+     */
+    suspend fun pushAllRead(track: Track) {
+        if (track.last_chapter_read > 0) {
+            api.markReadThrough(dirOf(track), track.last_chapter_read)
+        }
+    }
+
     override suspend fun bind(track: Track, hasReadChapters: Boolean): Track = track
 
     override suspend fun search(query: String): List<TrackSearch> = emptyList()

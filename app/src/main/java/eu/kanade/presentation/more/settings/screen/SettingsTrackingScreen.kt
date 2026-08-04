@@ -51,6 +51,7 @@ import eu.kanade.presentation.more.settings.Preference
 import eu.kanade.tachiyomi.data.track.EnhancedTracker
 import eu.kanade.tachiyomi.data.track.Tracker
 import eu.kanade.tachiyomi.data.track.TrackerManager
+import eu.kanade.tachiyomi.data.track.remanga.Remanga
 import eu.kanade.tachiyomi.data.track.anilist.AnilistApi
 import eu.kanade.tachiyomi.data.track.bangumi.BangumiApi
 import eu.kanade.tachiyomi.data.track.hikka.HikkaApi
@@ -412,9 +413,16 @@ object SettingsTrackingScreen : SearchableSettings {
 
             getTracks.await(manga.id).forEach { track ->
                 val tracker = trackerManager.get(track.trackerId) ?: return@forEach
-                if (tracker !is EnhancedTracker || !tracker.isLoggedIn) return@forEach
+                if (!tracker.isLoggedIn) return@forEach
+                val dbTrack = track.copy(lastChapterRead = maxRead).toDbTrack()
                 runCatching {
-                    tracker.update(track.copy(lastChapterRead = maxRead).toDbTrack(), didReadChapter = true)
+                    when (tracker) {
+                        // Remanga: полная глубина — закрывает и пробелы ниже сайтового указателя
+                        is Remanga -> tracker.pushAllRead(dbTrack)
+                        // MangaLib и пр.: сайт заполняет между сам при сдвиге указателя
+                        is EnhancedTracker -> tracker.update(dbTrack, didReadChapter = true)
+                        else -> return@forEach
+                    }
                 }.onSuccess { pushed++ }.onFailure {
                     failed++
                     logcat(LogPriority.WARN, it) { "Bulk push: ${manga.title} → ${tracker.name} не отправлен" }

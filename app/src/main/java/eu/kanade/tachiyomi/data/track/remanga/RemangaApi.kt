@@ -48,14 +48,29 @@ class RemangaApi(private val client: OkHttpClient) {
     }.content
 
     /**
-     * PUSH: пометить прочитанными все главы вплоть до [chapterNumber].
-     * Отмечаем диапазон (current_reading, chapterNumber] — так закрываем «пробел»:
-     * при прыжке вперёд промежуточные главы тоже становятся прочитанными (как на mangalib,
-     * где сайт сам заполняет между; у Remanga такого нет — заполняем клиентом).
-     * POST /api/activity/views/ тело {"chapter_ids":[…]} — батч кнопки «прочитано»
-     * (обратимо через DELETE тем же телом). Сервер режет большой payload → шлём чанками.
+     * PUSH при обычном чтении: пометить прочитанным диапазон (current_reading, chapterNumber].
+     * Так при прыжке ВПЕРЁД промежуточные главы тоже становятся прочитанными (аналог mangalib,
+     * где сайт заполняет между сам; у Remanga такого нет — заполняем клиентом). Дёшево: обычно
+     * 1–2 страницы. Пробелы НИЖЕ сайтового указателя не трогает — для этого markReadThrough.
      */
-    suspend fun markChapterRead(dir: String, chapterNumber: Double): Unit = withIOContext {
+    suspend fun markChapterRead(dir: String, chapterNumber: Double): Unit =
+        markRange(dir, chapterNumber, fromStart = false)
+
+    /**
+     * PUSH при разовой выгрузке: пометить прочитанными ВСЕ главы вплоть до [throughNumber] от
+     * начала ветки, не завися от current_reading. Закрывает и пробелы НИЖЕ сайтового указателя
+     * (их частый источник — старый пофронтирный push). Дороже (весь диапазон), но разовое.
+     */
+    suspend fun markReadThrough(dir: String, throughNumber: Double): Unit =
+        markRange(dir, throughNumber, fromStart = true)
+
+    /**
+     * POST /api/activity/views/ тело {"chapter_ids":[…]} — батч кнопки «прочитано» (обратимо
+     * DELETE тем же телом). Сервер режет большой payload → шлём чанками.
+     * fromStart=false: нижняя граница = current_reading (что ниже — уже прочитано на сайте).
+     * fromStart=true: нижняя граница = 0 (полная глубина).
+     */
+    private suspend fun markRange(dir: String, to: Double, fromStart: Boolean): Unit = withIOContext {
         // Ошибки бросаем: TrackChapter поставит главу в DelayedTrackingStore на ретрай.
         val token = readToken()
             ?: throw IllegalStateException("Remanga: не залогинен — войди через WebView расширения")
@@ -74,10 +89,9 @@ class RemangaApi(private val client: OkHttpClient) {
             return@withIOContext
         }
 
-        // Нижняя граница — прогресс на сайте: ниже него всё уже прочитано, не трогаем.
-        val from = title.currentReading?.chapter?.toDoubleOrNull() ?: 0.0
-        val ids = collectChapterIds(branchId, from, chapterNumber, h)
-        if (ids.isEmpty()) return@withIOContext // сайт уже впереди или главы не найдены
+        val from = if (fromStart) 0.0 else title.currentReading?.chapter?.toDoubleOrNull() ?: 0.0
+        val ids = collectChapterIds(branchId, from, to, h)
+        if (ids.isEmpty()) return@withIOContext // нечего помечать (сайт уже впереди / главы не найдены)
 
         ids.chunked(BATCH_SIZE).forEach { chunk ->
             val payload = buildJsonObject {
