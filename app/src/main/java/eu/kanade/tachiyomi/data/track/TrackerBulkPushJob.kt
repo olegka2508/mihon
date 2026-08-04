@@ -2,6 +2,7 @@ package eu.kanade.tachiyomi.data.track
 
 import android.content.Context
 import android.content.pm.ServiceInfo
+import android.net.Uri
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
@@ -12,9 +13,12 @@ import androidx.work.WorkerParameters
 import eu.kanade.domain.track.interactor.AddTracks
 import eu.kanade.domain.track.model.toDbTrack
 import eu.kanade.tachiyomi.R
+import eu.kanade.tachiyomi.data.notification.NotificationReceiver
 import eu.kanade.tachiyomi.data.notification.Notifications
 import eu.kanade.tachiyomi.data.track.remanga.Remanga
+import eu.kanade.tachiyomi.util.storage.getUriCompat
 import eu.kanade.tachiyomi.util.system.cancelNotification
+import eu.kanade.tachiyomi.util.system.createFileInCacheDir
 import eu.kanade.tachiyomi.util.system.notificationBuilder
 import eu.kanade.tachiyomi.util.system.notify
 import eu.kanade.tachiyomi.util.system.setForegroundSafely
@@ -68,6 +72,7 @@ class TrackerBulkPushJob(private val context: Context, params: WorkerParameters)
         val ok = HashMap<String, Int>()
         val err = HashMap<String, Int>()
         val errMsgs = LinkedHashMap<String, Int>()
+        val failures = mutableListOf<Pair<String, String>>() // (причина, название тайтла) — для файла-отчёта
 
         library.forEachIndexed { index, libManga ->
             if (isStopped) return Result.success() // пользователь отменил
@@ -101,13 +106,14 @@ class TrackerBulkPushJob(private val context: Context, params: WorkerParameters)
                     err[tracker.name] = (err[tracker.name] ?: 0) + 1
                     val msg = "${tracker.name}: ${it.message ?: it.javaClass.simpleName}"
                     errMsgs[msg] = (errMsgs[msg] ?: 0) + 1
+                    failures.add(msg to manga.title)
                     logcat(LogPriority.WARN, it) { "Bulk push: ${manga.title} → ${tracker.name} не отправлен" }
                 }
             }
         }
 
         context.cancelNotification(Notifications.ID_TRACKER_BULK_PROGRESS)
-        showReport(ok, err, errMsgs)
+        showReport(ok, err, errMsgs, failures)
         return Result.success()
     }
 
@@ -121,8 +127,17 @@ class TrackerBulkPushJob(private val context: Context, params: WorkerParameters)
             setProgress(total, current, total == 0)
         }.build()
 
-    /** Отчёт-уведомление: разбивка по трекерам «MangaLib 69/0, Remanga 0/53» + тексты ошибок. */
-    private fun showReport(ok: Map<String, Int>, err: Map<String, Int>, errMsgs: Map<String, Int>) {
+    /**
+     * Отчёт-уведомление: разбивка по трекерам «MangaLib 36/43, Remanga 42/1» + топ ошибок в BigText,
+     * а полный список (какой тайтл по какой причине) — в файле, открываемом по тапу (как отчёт
+     * ошибок обновления библиотеки у Mihon).
+     */
+    private fun showReport(
+        ok: Map<String, Int>,
+        err: Map<String, Int>,
+        errMsgs: Map<String, Int>,
+        failures: List<Pair<String, String>>,
+    ) {
         val names = (ok.keys + err.keys).toSortedSet()
         val head = if (names.isEmpty()) {
             context.stringResource(MR.strings.tracker_bulk_push_none)
@@ -139,6 +154,8 @@ class TrackerBulkPushJob(private val context: Context, params: WorkerParameters)
                 }
             }
         }
+        val reportUri = writeReportFile(head, failures)
+
         context.notify(
             Notifications.ID_TRACKER_BULK_COMPLETE,
             context.notificationBuilder(Notifications.CHANNEL_COMMON) {
@@ -147,8 +164,28 @@ class TrackerBulkPushJob(private val context: Context, params: WorkerParameters)
                 setStyle(NotificationCompat.BigTextStyle().bigText(body))
                 setSmallIcon(R.drawable.ic_done_24dp)
                 setAutoCancel(true)
+                // тап по уведомлению открывает полный файл-отчёт
+                reportUri?.let { setContentIntent(NotificationReceiver.openErrorLogPendingActivity(context, it)) }
             }.build(),
         )
+    }
+
+    /** Пишет полный отчёт в кэш-файл, группируя тайтлы по причине. Возвращает Uri или null. */
+    private fun writeReportFile(head: String, failures: List<Pair<String, String>>): Uri? {
+        if (failures.isEmpty()) return null
+        return try {
+            val file = context.createFileInCacheDir("mihon_tracker_push.txt")
+            file.bufferedWriter().use { out ->
+                out.write("$head\n")
+                failures.groupBy({ it.first }, { it.second }).forEach { (reason, titles) ->
+                    out.write("\n! $reason\n")
+                    titles.forEach { out.write("    - $it\n") }
+                }
+            }
+            file.getUriCompat(context)
+        } catch (_: Exception) {
+            null
+        }
     }
 
     companion object {

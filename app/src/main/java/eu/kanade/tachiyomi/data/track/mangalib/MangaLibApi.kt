@@ -9,6 +9,7 @@ import android.webkit.WebViewClient
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.POST
 import eu.kanade.tachiyomi.network.awaitSuccess
+import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.network.parseAs
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
@@ -27,8 +28,15 @@ import uy.kohesive.injekt.injectLazy
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
+import kotlin.time.Duration.Companion.seconds
 
-class MangaLibApi(private val client: OkHttpClient) {
+class MangaLibApi(baseClient: OkHttpClient) {
+
+    // У mangalib жёсткий лимит ~1 rps: при массовой выгрузке без троттлинга сыпется HTTP 429.
+    // rateLimit-перехватчик РАЗНОСИТ запросы во времени (блокирует, а не отбрасывает).
+    private val client = baseClient.newBuilder()
+        .rateLimit(permits = 1, period = 1.seconds)
+        .build()
 
     private val json: Json by injectLazy()
 
