@@ -65,7 +65,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import logcat.LogPriority
-import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.lang.withUIContext
 import tachiyomi.core.common.util.system.logcat
@@ -397,8 +396,10 @@ object SettingsTrackingScreen : SearchableSettings {
         val sourceManager = Injekt.get<SourceManager>()
 
         withUIContext { context.toast(MR.strings.push_all_read_started) }
-        var pushed = 0
-        var failed = 0
+        // диагностика: счёт ok/ошибок ПО ТРЕКЕРАМ + текст первой ошибки (видно, что именно падает)
+        val ok = HashMap<String, Int>()
+        val err = HashMap<String, Int>()
+        var firstError: String? = null
         for (libManga in getLibraryManga.await().distinctBy { it.manga.id }) {
             val manga = libManga.manga
             val maxRead = getChapters.await(manga.id)
@@ -423,13 +424,21 @@ object SettingsTrackingScreen : SearchableSettings {
                         is EnhancedTracker -> tracker.update(dbTrack, didReadChapter = true)
                         else -> return@forEach
                     }
-                }.onSuccess { pushed++ }.onFailure {
-                    failed++
+                }.onSuccess { ok[tracker.name] = (ok[tracker.name] ?: 0) + 1 }.onFailure {
+                    err[tracker.name] = (err[tracker.name] ?: 0) + 1
+                    if (firstError == null) firstError = "${tracker.name}: ${it.message ?: it.javaClass.simpleName}"
                     logcat(LogPriority.WARN, it) { "Bulk push: ${manga.title} → ${tracker.name} не отправлен" }
                 }
             }
         }
-        withUIContext { context.toast(context.stringResource(MR.strings.push_all_read_done, pushed, failed)) }
+        // тост вида «MangaLib 69/0, Remanga 0/53 — Remanga: не залогинен…»
+        val summary = buildString {
+            val names = (ok.keys + err.keys).toSortedSet()
+            append(names.joinToString(", ") { "$it ${ok[it] ?: 0}/${err[it] ?: 0}" })
+            firstError?.let { append(" — ").append(it.take(120)) }
+            if (isEmpty()) append("нет привязанных трекеров")
+        }
+        withUIContext { context.toast(summary) }
     }
 
     @Composable
