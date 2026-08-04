@@ -8,6 +8,7 @@ import eu.kanade.tachiyomi.network.parseAs
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import logcat.LogPriority
 import okhttp3.Headers
@@ -89,7 +90,8 @@ class RemangaApi(private val client: OkHttpClient) {
             return@withIOContext
         }
 
-        val from = if (fromStart) 0.0 else title.currentReading?.chapter?.toDoubleOrNull() ?: 0.0
+        val sitePointer = title.currentReading?.chapter?.toDoubleOrNull() ?: 0.0
+        val from = if (fromStart) 0.0 else sitePointer
         val ids = collectChapterIds(branchId, from, to, h)
         if (ids.isEmpty()) return@withIOContext // нечего помечать (сайт уже впереди / главы не найдены)
 
@@ -101,19 +103,59 @@ class RemangaApi(private val client: OkHttpClient) {
                 POST("$API_URL/api/activity/views/", h, payload.toString().toRequestBody(JSON_MIME)),
             ).awaitSuccess()
         }
+
+        // Двигаем указатель «продолжить чтение» к верхней главе диапазона (аналог movePointer
+        // у mangalib). ids идут по возрастанию → последний = фронтир. Только ВПЕРЁД: если сайт по
+        // указателю уже выше — не регрессируем. Сбой указателя не валит push (главное — viewed).
+        if (to > sitePointer + EPS) {
+            runCatching { advancePointer(ids.last(), h) }
+                .onFailure { logcat(LogPriority.WARN, it) { "Remanga tracker: указатель «продолжить» не сдвинут ($dir)" } }
+        }
     }
 
     /**
-     * PULL: последний прочитанный номер главы с сайта (merge-by-max в Mihon).
-     * Берём content.current_reading — готовый указатель, один запрос без пагинации.
-     * continue_reading СОЗНАТЕЛЬНО не используем: это следующая глава к прочтению,
-     * она завысила бы прогресс на единицу и Mihon пометил бы непрочитанное прочитанным.
+     * POST /api/v2/activity/view-page/ {"chapter_id":id,"page":-1} — так читалка сайта отмечает
+     * главу дочитанной до конца; двигает current_reading (указатель «продолжить чтение») на неё.
+     */
+    private suspend fun advancePointer(chapterId: Long, h: Headers) {
+        val payload = buildJsonObject {
+            put("chapter_id", chapterId)
+            put("page", -1)
+        }
+        client.newCall(
+            POST("$API_URL/api/v2/activity/view-page/", h, payload.toString().toRequestBody(JSON_MIME)),
+        ).awaitSuccess()
+    }
+
+    /**
+     * PULL: верх НЕПРЕРЫВНОГО «viewed» на сайте (merge-by-max в Mihon).
+     * current_reading — лишь указатель «продолжить», он двигается при чтении на сайте и может
+     * быть НИЖЕ реального max viewed (напр. после нашего push viewed=228, а указатель=217).
+     * Поэтому берём current_reading как нижнюю оценку и сканируем главы ВВЕРХ до первой
+     * непрочитанной. Обычно 1 страница (указатель ≈ фронтир); дороже только если сильно разошлись.
      */
     suspend fun fetchLastReadNumber(dir: String): Double? = withIOContext {
         // pull не должен бросать: зовётся перед каждым push и на открытии тайтла
         runCatching {
             val token = readToken() ?: return@runCatching null
-            title(dir, headers(token)).currentReading?.chapter?.toDoubleOrNull()
+            val h = headers(token)
+            val title = title(dir, h)
+            val branchId = title.branches.maxByOrNull { it.countChapters }?.id ?: return@runCatching null
+            val seed = title.currentReading?.chapter?.toDoubleOrNull() ?: 0.0
+
+            var frontier = seed
+            var page = startPage(branchId, seed, h)
+            repeat(MAX_PAGES) {
+                val chapters = chaptersPage(branchId, page, h)
+                if (chapters.isEmpty()) return@runCatching frontier.takeIf { it > 0 }
+                for (c in chapters) {
+                    val n = c.chapter.toDoubleOrNull() ?: continue
+                    if (n <= frontier + EPS) continue // ниже уже известного фронтира
+                    if (c.viewed) frontier = n else return@runCatching frontier.takeIf { it > 0 }
+                }
+                page++
+            }
+            frontier.takeIf { it > 0 }
         }.getOrNull()
     }
 
@@ -127,17 +169,7 @@ class RemangaApi(private val client: OkHttpClient) {
      */
     private suspend fun collectChapterIds(branchId: Long, from: Double, to: Double, h: Headers): List<Long> {
         if (to <= from) return emptyList()
-        var page = maxOf(1, ceil(from / PAGE_SIZE).toInt())
-
-        // Откат назад: пустая страница (за концом ветки) или минимум страницы выше from —
-        // значит старт слишком высоко и мы бы перескочили нужные главы.
-        var back = 0
-        while (page > 1 && back < MAX_PAGES) {
-            back++
-            val min = chaptersPage(branchId, page, h).mapNotNull { it.chapter.toDoubleOrNull() }.minOrNull()
-            if (min != null && min <= from + EPS) break
-            page--
-        }
+        var page = startPage(branchId, from, h)
 
         val ids = mutableListOf<Long>()
         repeat(MAX_PAGES) {
@@ -153,6 +185,23 @@ class RemangaApi(private val client: OkHttpClient) {
             page++
         }
         return ids
+    }
+
+    /**
+     * Стартовая страница для нижней границы [from]: эвристика «номер≈index» плюс откат назад,
+     * если старт-страница пуста (за концом ветки) или её минимум выше from (номера опережают
+     * index) — иначе можно перескочить нужные главы.
+     */
+    private suspend fun startPage(branchId: Long, from: Double, h: Headers): Int {
+        var page = maxOf(1, ceil(from / PAGE_SIZE).toInt())
+        var back = 0
+        while (page > 1 && back < MAX_PAGES) {
+            back++
+            val min = chaptersPage(branchId, page, h).mapNotNull { it.chapter.toDoubleOrNull() }.minOrNull()
+            if (min != null && min <= from + EPS) break
+            page--
+        }
+        return page
     }
 
     private suspend fun chaptersPage(branchId: Long, page: Int, h: Headers): List<ChapterDto> = with(json) {

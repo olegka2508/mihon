@@ -29,4 +29,6 @@ class TitleDto(
 class ChapterDto(
     val id: Long,
     val chapter: String,
+    // прочитана ли глава на сайте (галочка «просмотрено»); нужна для точного pull по max viewed
+    val viewed: Boolean = false,
 )
