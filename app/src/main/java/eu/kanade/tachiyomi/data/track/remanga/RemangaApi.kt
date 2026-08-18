@@ -151,7 +151,7 @@ class RemangaApi(private val client: OkHttpClient) {
                 for (c in chapters) {
                     val n = c.chapter.toDoubleOrNull() ?: continue
                     if (n <= frontier + EPS) continue // ниже уже известного фронтира
-                    if (c.viewed) frontier = n else return@runCatching frontier.takeIf { it > 0 }
+                    if (c.viewed == true) frontier = n else return@runCatching frontier.takeIf { it > 0 }
                 }
                 page++
             }

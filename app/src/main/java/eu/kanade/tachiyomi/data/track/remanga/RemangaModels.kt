@@ -29,6 +29,8 @@ class TitleDto(
 class ChapterDto(
     val id: Long,
     val chapter: String,
-    // прочитана ли глава на сайте (галочка «просмотрено»); нужна для точного pull по max viewed
-    val viewed: Boolean = false,
+    // прочитана ли глава на сайте (галочка «просмотрено»); нужна для точного pull по max viewed.
+    // NULLABLE: API отдаёт "viewed":null для непрочитанных — non-nullable Boolean на явном null
+    // роняет разбор ВСЕЙ страницы (default применяется только к ОТСУТСТВУЮЩЕМУ ключу). null = не прочитано.
+    val viewed: Boolean? = null,
 )
