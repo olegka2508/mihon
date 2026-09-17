@@ -11,6 +11,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import logcat.LogPriority
+import okhttp3.Cookie
 import okhttp3.Headers
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
@@ -28,13 +29,11 @@ class RemangaApi(private val client: OkHttpClient) {
 
     /**
      * Токен берём из общего cookie-jar — тем же способом, что расширение Remanga.
-     * Куки кладёт WebView-логин расширения, второй логин пользователю не нужен.
+     * Новый сайт использует auth:token, старый token оставлен для совместимости.
      */
-    private fun readToken(): String? = client.cookieJar
-        .loadForRequest(SITE_URL.toHttpUrl())
-        .firstOrNull { it.name == "token" }
-        ?.let { runCatching { URLDecoder.decode(it.value, "UTF-8") }.getOrNull() }
-        ?.takeIf { it.isNotBlank() }
+    private fun readToken(): String? = readRemangaToken(
+        client.cookieJar.loadForRequest(SITE_URL.toHttpUrl()),
+    )
 
     private fun headers(token: String): Headers = Headers.Builder()
         .add("Accept", "application/json")
@@ -226,3 +225,10 @@ class RemangaApi(private val client: OkHttpClient) {
                 "Chrome/138.0.0.0 Mobile Safari/537.36"
     }
 }
+
+internal fun readRemangaToken(cookies: List<Cookie>): String? = listOf("auth:token", "token")
+    .firstNotNullOfOrNull { name ->
+        cookies.firstOrNull { it.name == name }
+            ?.let { runCatching { URLDecoder.decode(it.value, "UTF-8") }.getOrNull() }
+            ?.takeIf { it.isNotBlank() }
+    }
