@@ -49,6 +49,7 @@ import eu.kanade.presentation.more.settings.Preference
 import eu.kanade.tachiyomi.data.track.EnhancedTracker
 import eu.kanade.tachiyomi.data.track.Tracker
 import eu.kanade.tachiyomi.data.track.TrackerManager
+import eu.kanade.tachiyomi.data.track.TrackerBulkPushJob
 import eu.kanade.tachiyomi.data.track.anilist.AnilistApi
 import eu.kanade.tachiyomi.data.track.bangumi.BangumiApi
 import eu.kanade.tachiyomi.data.track.hikka.HikkaApi
@@ -134,6 +135,21 @@ object SettingsTrackingScreen : SearchableSettings {
                 entries = AutoTrackState.entries
                     .associateWith { stringResource(it.titleRes) },
                 title = stringResource(MR.strings.pref_auto_update_manga_on_mark_read),
+            ),
+            Preference.PreferenceItem.SwitchPreference(
+                preference = trackPreferences.refreshTracksOnLibraryUpdate,
+                title = stringResource(MR.strings.pref_refresh_tracks_on_library_update),
+                subtitle = stringResource(MR.strings.pref_refresh_tracks_on_library_update_summary),
+            ),
+            Preference.PreferenceItem.TextPreference(
+                title = stringResource(MR.strings.pref_push_all_read_to_trackers),
+                subtitle = stringResource(MR.strings.pref_push_all_read_to_trackers_summary),
+                onClick = {
+                    // фоновая задача с полосой прогресса и отчётом-уведомлением; KEEP не даёт
+                    // запустить параллельный проход повторным тапом
+                    context.toast(MR.strings.push_all_read_started)
+                    TrackerBulkPushJob.startNow(context)
+                },
             ),
             Preference.PreferenceGroup(
                 title = stringResource(MR.strings.services),

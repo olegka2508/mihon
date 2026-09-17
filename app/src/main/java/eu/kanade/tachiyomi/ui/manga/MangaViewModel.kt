@@ -226,12 +226,13 @@ class MangaViewModel(
 
             val needRefreshInfo = !manga.initialized
             val needRefreshChapter = chapters.isEmpty()
+            val source = Injekt.get<SourceManager>().getOrStub(manga.source)
 
             // Show what we have earlier
             mutableState.update {
                 State.Success(
                     manga = manga,
-                    source = Injekt.get<SourceManager>().getOrStub(manga.source),
+                    source = source,
                     isFromSource = isFromSource,
                     chapters = chapters,
                     availableScanlators = getAvailableScanlators.await(mangaId),
@@ -244,6 +245,11 @@ class MangaViewModel(
 
             // Start observe tracking since it only needs mangaId
             observeTrackers()
+
+            // Восстановленные из бэкапа тайтлы могли не пройти штатную привязку при добавлении.
+            if (manga.favorite) {
+                addTracks.bindEnhancedTrackers(manga, source)
+            }
 
             // Fetch info-chapters when needed
             if ((needRefreshInfo || needRefreshChapter) && viewModelScope.isActive) {

@@ -50,4 +50,10 @@ class TrackPreferences(
         "pref_auto_update_manga_on_mark_read",
         AutoTrackState.ALWAYS,
     )
+
+    // Форк: pull прогресса с трекеров при обновлении библиотеки (~+1 запрос/тайтл, поэтому default off)
+    val refreshTracksOnLibraryUpdate: Preference<Boolean> = preferenceStore.getBoolean(
+        "pref_refresh_tracks_on_library_update",
+        false,
+    )
 }

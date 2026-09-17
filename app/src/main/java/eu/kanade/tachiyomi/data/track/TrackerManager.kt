@@ -7,8 +7,10 @@ import eu.kanade.tachiyomi.data.track.kavita.Kavita
 import eu.kanade.tachiyomi.data.track.kitsu.Kitsu
 import eu.kanade.tachiyomi.data.track.komga.Komga
 import eu.kanade.tachiyomi.data.track.mangabaka.MangaBaka
+import eu.kanade.tachiyomi.data.track.mangalib.MangaLib
 import eu.kanade.tachiyomi.data.track.mangaupdates.MangaUpdates
 import eu.kanade.tachiyomi.data.track.myanimelist.MyAnimeList
+import eu.kanade.tachiyomi.data.track.remanga.Remanga
 import eu.kanade.tachiyomi.data.track.shikimori.Shikimori
 import eu.kanade.tachiyomi.data.track.suwayomi.Suwayomi
 import kotlinx.coroutines.flow.combine
@@ -33,6 +35,8 @@ class TrackerManager {
     val suwayomi = Suwayomi(9L)
     val hikka = Hikka(10L)
     val mangaBaka = MangaBaka(MANGABAKA)
+    val mangaLib = MangaLib(12L)
+    val remanga = Remanga(13L)
 
     val trackers = listOf(
         myAnimeList,
@@ -46,6 +50,8 @@ class TrackerManager {
         suwayomi,
         hikka,
         mangaBaka,
+        mangaLib,
+        remanga,
     )
 
     fun loggedInTrackers() = trackers.filter { it.isLoggedIn }
