@@ -94,6 +94,7 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
     private val notifier = LibraryUpdateNotifier(context)
 
     private var mangaToUpdate: List<LibraryManga> = mutableListOf()
+    private var mangaToRefreshTracks: List<LibraryManga> = mutableListOf()
 
     override suspend fun doWork(): Result {
         if (tags.contains(WORK_NAME_AUTO)) {
@@ -178,6 +179,7 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
             timeZone,
         )
 
+        mangaToRefreshTracks = listToUpdate
         mangaToUpdate = listToUpdate
             .filter {
                 when {
@@ -245,9 +247,6 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
         val hasDownloads = AtomicBoolean(false)
         val timeZone = TimeZone.currentSystemDefault()
         val fetchWindow = fetchInterval.getWindow(Clock.System.now().toLocalDateTime(timeZone).date, timeZone)
-        // Форк: pull прогресса с трекеров per-manga (default off, см. настройки трекинга)
-        val refreshTracksEnabled = trackPreferences.refreshTracksOnLibraryUpdate.get()
-
         coroutineScope {
             mangaToUpdate.groupBy { it.manga.source }.values
                 .map { mangaInSource ->
@@ -284,11 +283,6 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
                                             // Convert to the manga that contains new chapters
                                             newUpdates.add(manga to newChapters.toTypedArray())
                                         }
-
-                                        // Форк: подтянуть прогресс с трекеров (merge-by-max, ошибки не роняют обновление)
-                                        if (refreshTracksEnabled) {
-                                            refreshTracks.await(manga.id)
-                                        }
                                     } catch (e: Throwable) {
                                         val errorMessage = when (e) {
                                             is NoChaptersException -> context.stringResource(
@@ -308,6 +302,28 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
                     }
                 }
                 .awaitAll()
+        }
+
+        // Pull не зависит от фильтров и ошибок обновления источника: настройка обещает
+        // подтянуть прогресс для каждого выбранного тайтла библиотеки.
+        if (trackPreferences.refreshTracksOnLibraryUpdate.get()) {
+            coroutineScope {
+                mangaToRefreshTracks.groupBy { it.manga.source }.values
+                    .map { mangaInSource ->
+                        async {
+                            semaphore.withPermit {
+                                mangaInSource.forEach { libraryManga ->
+                                    val manga = libraryManga.manga
+                                    ensureActive()
+                                    if (getManga.await(manga.id)?.favorite == true) {
+                                        refreshTracks.await(manga.id)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .awaitAll()
+            }
         }
 
         notifier.cancelProgressNotification()
