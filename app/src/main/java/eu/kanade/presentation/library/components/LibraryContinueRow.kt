@@ -7,7 +7,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.PlayArrow
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -57,7 +57,7 @@ fun LibraryContinueRow(history: HistoryWithRelations, chapter: Chapter, onClick:
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Icon(Icons.AutoMirrored.Filled.PlayArrow, null, tint = MaterialTheme.colorScheme.primary)
+            Icon(Icons.Filled.PlayArrow, null, tint = MaterialTheme.colorScheme.primary)
         }
     }
 }
