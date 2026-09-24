@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="reader_continue">Продолжить чтение</string>
+    <string name="reader_continue_position">%1$s · Страница %2$d</string>
     <string name="action_add">Добавить</string>
     <string name="action_add_category">Добавить категорию</string>
     <string name="action_bookmark">Добавить закладку</string>
@@ -815,6 +817,7 @@
     <string name="pref_incognito_mode_extension_summary">Приостановить историю чтения для расширений</string>
     <string name="label_auto">Авто</string>
     <string name="theme_monochrome">Монохром</string>
+    <string name="theme_khaki">Хаки</string>
     <string name="tracked_privately">Отслеживается приватно</string>
     <string name="action_toggle_private_on">Отслеживать приватно</string>
     <string name="action_toggle_private_off">Отслеживать публично</string>
@@ -922,4 +925,6 @@
     <string name="theme_tokyonight">Токийская Ночь</string>
     <string name="pref_filter_update_categories_details">Обновления в исключённых категориях не будут показываться, даже если они находятся во включённых категориях.</string>
     <string name="pref_filter_upcoming_categories_details">Серии в исключённых категориях не будут показываться, даже если находятся в любых включённых категориях.</string>
+    <string name="reader_catalog">Каталог</string>
+    <string name="reader_sources_extensions">Источники и расширения</string>
 </resources>

@@ -565,6 +565,47 @@
         <item name="colorSurfaceContainerHighest">@color/monochrome_surfaceContainerHighest</item>
     </style>
 
+    <!--== Khaki Theme ==-->
+    <style name="Theme.Tachiyomi.Khaki">
+        <!-- Theme Colors -->
+        <item name="elevationOverlayColor">@color/khaki_surfaceTint</item>
+        <item name="colorPrimary">@color/khaki_primary</item>
+        <item name="colorOnPrimary">@color/khaki_onPrimary</item>
+        <item name="colorPrimaryContainer">@color/khaki_primaryContainer</item>
+        <item name="colorOnPrimaryContainer">@color/khaki_onPrimaryContainer</item>
+        <item name="colorPrimaryInverse">@color/khaki_inversePrimary</item>
+        <item name="colorSecondary">@color/khaki_secondary</item>
+        <item name="colorOnSecondary">@color/khaki_onSecondary</item>
+        <item name="colorSecondaryContainer">@color/khaki_secondaryContainer</item>
+        <item name="colorOnSecondaryContainer">@color/khaki_onSecondaryContainer</item>
+        <item name="colorTertiary">@color/khaki_tertiary</item>
+        <item name="colorOnTertiary">@color/khaki_onTertiary</item>
+        <item name="colorTertiaryContainer">@color/khaki_tertiaryContainer</item>
+        <item name="colorOnTertiaryContainer">@color/khaki_onTertiaryContainer</item>
+        <item name="android:colorBackground">@color/khaki_background</item>
+        <item name="colorOnBackground">@color/khaki_onBackground</item>
+        <item name="colorSurface">@color/khaki_surface</item>
+        <item name="colorOnSurface">@color/khaki_onSurface</item>
+        <item name="colorSurfaceVariant">@color/khaki_surfaceVariant</item>
+        <item name="colorOnSurfaceVariant">@color/khaki_onSurfaceVariant</item>
+        <item name="colorSurfaceInverse">@color/khaki_inverseSurface</item>
+        <item name="colorOnSurfaceInverse">@color/khaki_inverseOnSurface</item>
+        <item name="colorError">@color/khaki_error</item>
+        <item name="colorOnError">@color/khaki_onError</item>
+        <item name="colorErrorContainer">@color/khaki_errorContainer</item>
+        <item name="colorOnErrorContainer">@color/khaki_onErrorContainer</item>
+        <item name="colorOutline">@color/khaki_outline</item>
+        <item name="colorOutlineVariant">@color/khaki_outlineVariant</item>
+        <item name="scrimBackground">@color/khaki_scrim</item>
+        <item name="colorSurfaceBright">@color/khaki_surfaceBright</item>
+        <item name="colorSurfaceDim">@color/khaki_surfaceDim</item>
+        <item name="colorSurfaceContainer">@color/khaki_surfaceContainer</item>
+        <item name="colorSurfaceContainerHigh">@color/khaki_surfaceContainerHigh</item>
+        <item name="colorSurfaceContainerHighest">@color/khaki_surfaceContainerHighest</item>
+        <item name="colorSurfaceContainerLow">@color/khaki_surfaceContainerLow</item>
+        <item name="colorSurfaceContainerLowest">@color/khaki_surfaceContainerLowest</item>
+    </style>
+
     <!--== AMOLED Mode Overlay ==-->
     <style name="ThemeOverlay.Tachiyomi.Amoled" parent="" />
 

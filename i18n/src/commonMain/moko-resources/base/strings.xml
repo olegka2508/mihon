@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="reader_continue">Continue reading</string>
+    <string name="reader_continue_position">%1$s · Page %2$d</string>
     <string name="app_name" translatable="false">Mihon</string>
 
     <!-- Generic strings -->
@@ -236,6 +238,7 @@
     <string name="theme_lavender">Lavender</string>
     <string name="theme_midnightdusk">Midnight Dusk</string>
     <string name="theme_monochrome">Monochrome</string>
+    <string name="theme_khaki">Khaki</string>
     <string name="theme_nord">Nord</string>
     <string name="theme_strawberrydaiquiri">Strawberry Daiquiri</string>
     <string name="theme_tako">Tako</string>
@@ -1074,4 +1077,6 @@
     <string name="donationCampaign.paragraph3">Regardless, Mihon will continue to be maintained by me and the volunteers, and it will stay open source.</string>
     <string name="donationCampaign.contactPlatform">Discord</string>
     <string name="donationCampaign.dismiss">Dismiss</string>
+    <string name="reader_catalog">Catalogue</string>
+    <string name="reader_sources_extensions">Sources and extensions</string>
 </resources>

@@ -21,6 +21,8 @@ internal fun LibraryTabs(
     PrimaryScrollableTabRow(
         selectedTabIndex = currentPageIndex,
         edgePadding = 0.dp,
+        containerColor = MaterialTheme.colorScheme.background,
+        divider = {},
     ) {
         categories.forEachIndexed { index, category ->
             Tab(
@@ -32,7 +34,7 @@ internal fun LibraryTabs(
                         badgeCount = getItemCountForCategory(category),
                     )
                 },
-                unselectedContentColor = MaterialTheme.colorScheme.onSurface,
+                unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }

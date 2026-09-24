@@ -2,7 +2,7 @@ name: Build foss APK
 
 on:
   push:
-    branches: [main, libsync, libsync-stable, libsync-v0.20.4]
+    branches: [main, libsync, libsync-stable, libsync-v0.20.4, product/v0.1]
   workflow_dispatch:
 
 concurrency:

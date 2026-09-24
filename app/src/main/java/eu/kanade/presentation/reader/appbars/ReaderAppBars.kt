@@ -35,12 +35,13 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import eu.kanade.presentation.reader.components.ChapterNavigator
 import eu.kanade.presentation.reader.components.ChapterNavigatorType
+import eu.kanade.presentation.util.ReaderMotion
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderOrientation
 import eu.kanade.tachiyomi.ui.reader.setting.ReadingMode
 import tachiyomi.presentation.core.components.material.padding
 
-private val readerBarsSlideAnimationSpec = tween<IntOffset>(200)
-private val readerBarsFadeAnimationSpec = tween<Float>(150)
+private val readerBarsSlideAnimationSpec = tween<IntOffset>(180, easing = ReaderMotion.easing)
+private val readerBarsFadeAnimationSpec = tween<Float>(140, easing = ReaderMotion.easing)
 
 @Composable
 fun ReaderAppBars(
